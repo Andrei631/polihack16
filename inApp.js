@@ -18,13 +18,14 @@ import {
 import Background from './razvam/Background';
 import OpenAI from 'openai';
 import Slider from '@react-native-community/slider';
-import firestore from '@react-native-firebase/firestore';
+import {onSnapshot, doc, getDoc, collection, getFirestore, addDoc, firestore} from '@react-native-firebase/firestore';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DatePicker from 'react-native-date-picker'
 import Toast from 'react-native-toast-message';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
 import {GoogleGenAI} from "@google/genai"
 import HowAreYouFeeling from './hayf';
+db = getFirestore()
 const BusyHoursModal = ({ modalRef, setBusy, tasksToBeArranged }) => {
   const [busyHours, setBusyHours] = React.useState([8, 14]);
   return (
@@ -233,11 +234,8 @@ const NewTaskModal = ({ modalRef }) => {
           }}
           onPress={() => {
             const userId = auth().currentUser.uid;
-            firestore()
-              .collection('users')
-              .doc(userId)
-              .collection('tasks')
-              .add({
+            
+            addDoc(collection(db, "users", userId, "tasks"), {
                 description:description,
                 difficulty: difficulty/10,
                 importance: priority/10,
@@ -259,6 +257,12 @@ const NewTaskModal = ({ modalRef }) => {
     </BottomSheetModal>
   );
 };
+
+const timeToString = (time) => {
+  const date = new Date(time);
+  return date.toISOString().split('T')[0];
+};
+
 const AgendaScreen = () => {
   const [items, setItems] = React.useState({});
   const [tasksToBeArranged, setTasksToBeArranged] = React.useState([]);
@@ -284,7 +288,6 @@ const AgendaScreen = () => {
 
   const GEMINI_API_KEY = "AIzaSyC1clS6dlnxagGHxNkI3fEkTq84WMNPhkA"
   const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" }); 
   const energyLevelJSON = `\n{ \"title\": \"Average Hourly Energy Levels\", \"xAxisLabel\": \"Hour\", \"yAxisLabel\": \"Energy Level\", \"data\": [ {\"hour\": 7, \"energyLevel\": 2.5}, {\"hour\": 8, \"energyLevel\": 3.2}, {\"hour\": 9, \"energyLevel\": 3.5}, {\"hour\": 10, \"energyLevel\": 3.8}, {\"hour\": 11, \"energyLevel\": 3.7}, {\"hour\": 12, \"energyLevel\": 3.5}, {\"hour\": 13, \"energyLevel\": 3.2}, {\"hour\": 14, \"energyLevel\": 1.8}, {\"hour\": 15, \"energyLevel\": 2.0}, {\"hour\": 16, \"energyLevel\": 2.3}, {\"hour\": 17, \"energyLevel\": 2.5}, {\"hour\": 18, \"energyLevel\": 3.2}, {\"hour\": 19, \"energyLevel\": 3.4}, {\"hour\": 20, \"energyLevel\": 3.7}, {\"hour\": 21, \"energyLevel\": 3.0}, {\"hour\": 22, \"energyLevel\": 2.5}, {\"hour\": 23, \"energyLevel\": 2.0}, {\"hour\": 0, \"energyLevel\": 1.5}, ], \"peak\": { \"start\": 7.5, \"end\": 12.5, \"label\": \"PEAK (7:30 AM - 12:30 PM): Ideal for complex tasks requiring focus and concentration.\" }, \"trough\": { \"start\": 13, \"end\": 15, \"label\": \"TROUGH (1:00 PM - 5:00 PM): Rest, recharge, or engage in low-intensity activities.\" }, \"rebound\": { \"start\": 17.5, \"end\": 20.5, \"label\": \"REBOUND (5:30 PM - 8:30 PM): Suitable for creative tasks or those requiring less intense focus.\" }, \"late_night\": { \"start\": 21, \"end\": 1, \"label\": \"LATE NIGHT (9:00 PM - 1:00 AM): Wind down, relax, and prepare for sleep.\" } }`
   const prompt = `"You are an advanced time management assistant. Your task is to reorder and schedule the provided tasks based on the following JSON, which includes average hourly energy levels, categorized periods (PEAK, TROUGH, REBOUND, LATE NIGHT), and their respective suitability for various task types.
 
@@ -323,7 +326,8 @@ const handleiaiai = async () => {
       environmentData: { currentDate: currentDate, currentTime: new Date().getHours() }
     };
     try {
-      const result = await model.generateContent({
+      const result = await ai.models.generateContent({
+        model:"gemini-2.5-flash",
         contents: [
           { role: "user", parts: [{ text: systemPrompt }] },
           { role: "user", parts: [{ text: JSON.stringify(userPrompt) }] },
@@ -352,7 +356,7 @@ const handleiaiai = async () => {
       }
 
       const updatedTasks = parsedResponse.tasks.sort((a, b) => a.optimalHour - b.optimalHour);
-      const newItems = items;
+      const newItems = {};
       for (let i = -15; i < 85; i++) {
         const time = new Date(currentDate).getTime() + i * 24 * 60 * 60 * 1000;
         const strTime = timeToString(time);
@@ -400,27 +404,25 @@ const handleiaiai = async () => {
     }
     setItems(newItems);
   }, []);
-  const loadItems = (day) => {
-    const newItems = items || {};
+  const loadItems = useCallback((day) => {
     setTimeout(() => {
-      for (let i = -15; i < 85; i++) {
-      const time = day.timestamp + i * 24 * 60 * 60 * 1000;
-      const strTime = timeToString(time);
-      if (!newItems[strTime]) {
-        newItems[strTime] = [];
-      }
-      }
-      const newItemsCopy = { ...newItems };
-      setItems(newItemsCopy);
+      setItems((prevItems) => {
+        const newItems = { ...prevItems };
+        for (let i = -15; i < 85; i++) {
+          const time = day.timestamp + i * 24 * 60 * 60 * 1000;
+          const strTime = timeToString(time);
+          if (!newItems[strTime]) {
+            newItems[strTime] = [];
+          }
+        }
+        return newItems;
+      });
     }, 1000);
-  };
+  }, []);
   useEffect(() => {
     const userId = auth().currentUser.uid;
-    const unsubscribe = firestore()
-      .collection('users')
-      .doc(userId)
-      .collection('tasks')
-      .onSnapshot(querySnapshot => {
+    const coll = collection(db, "users", userId, "tasks")
+    const unsubscribe = onSnapshot(coll, querySnapshot => {
         const tasks = [];
         console.log(querySnapshot.ref);
         querySnapshot.forEach(doc => {
@@ -440,7 +442,7 @@ const handleiaiai = async () => {
 
     return () => unsubscribe();
   }, []);
-  const renderItem = (reservation) => {
+  const renderItem = useCallback((reservation) => {
     return (
       <Pressable style={[styles.item, { height: 100 }]} onPress={() => { Alert.alert('Task Details', `Description: ${reservation.description}\nDifficulty: ${reservation.difficulty}\nImportance: ${reservation.importance}\nDuration: ${reservation.duration}\nEnergyLevel: ${reservation.energyLevel}`) }}>
       <Text>{reservation.optimalHour}:00 - {reservation.optimalHour + Math.ceil(reservation.duration)}:00</Text>
@@ -448,24 +450,19 @@ const handleiaiai = async () => {
       <Text>Due Date: {new Date(reservation.dueDate).toLocaleDateString('en-GB')} {new Date(reservation.dueDate).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}</Text>
       </Pressable>
     );
-  };
+  }, []);
 
-  const renderEmptyDate = () => {
+  const renderEmptyDate = useCallback(() => {
     return (
       <View style={styles.emptyDate}>
         <View style={{ borderBottomColor: 'gray', borderBottomWidth: 1, marginVertical: 10 }} />
       </View>
     );
-  };
+  }, []);
 
-  const rowHasChanged = (r1, r2) => {
+  const rowHasChanged = useCallback((r1, r2) => {
     return r1.name !== r2.name;
-  };
-
-  const timeToString = (time) => {
-    const date = new Date(time);
-    return date.toISOString().split('T')[0];
-  };
+  }, []);
 
   return (
     <View style={{ flex: 1, backgroundColor: '#493155' }}>
