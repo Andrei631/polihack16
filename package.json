@@ -12,6 +12,7 @@
     "@google/genai": "^1.5.1",
     "@google/generative-ai": "^0.24.1",
     "@gorhom/bottom-sheet": "^5.0.6",
+    "@kingstinct/react-native-healthkit": "^9.0.6",
     "@ptomasroos/react-native-multi-slider": "^2.2.2",
     "@react-native-community/datetimepicker": "8.3.0",
     "@react-native-community/slider": "4.5.6",
@@ -24,20 +25,24 @@
     "eas": "^0.1.0",
     "expo": "^53.0.0",
     "expo-dev-client": "~5.2.1",
+    "expo-health-connect": "^0.1.1",
     "expo-status-bar": "~2.2.3",
     "openai": "^4.76.0",
     "react": "19.0.0",
     "react-native": "0.79.4",
-    "react-native-calendars": "^1.1307.0",
+    "react-native-calendars": "1.1308.0",
     "react-native-date-picker": "^5.0.7",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-health-connect": "^3.3.3",
+    "react-native-nitro-modules": "^0.26.2",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-toast-message": "^2.2.1"
   },
   "devDependencies": {
-    "@babel/core": "^7.26.0"
+    "@babel/core": "^7.26.0",
+    "expo-build-properties": "^0.14.6"
   },
   "private": true
 }

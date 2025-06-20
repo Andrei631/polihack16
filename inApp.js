@@ -18,15 +18,15 @@ import {
 import Background from './razvam/Background';
 import OpenAI from 'openai';
 import Slider from '@react-native-community/slider';
-import {onSnapshot, doc, getDoc, collection, getFirestore, addDoc, firestore} from '@react-native-firebase/firestore';
+import {onSnapshot, doc, getDoc, collection, getFirestore, addDoc, Timestamp, getDocs} from '@react-native-firebase/firestore';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import DatePicker from 'react-native-date-picker'
 import Toast from 'react-native-toast-message';
 import MultiSlider from '@ptomasroos/react-native-multi-slider';
-import {GoogleGenAI} from "@google/genai"
+import {GoogleGenAI, Type} from "@google/genai"
 import HowAreYouFeeling from './hayf';
 db = getFirestore()
-const BusyHoursModal = ({ modalRef, setBusy, tasksToBeArranged }) => {
+const BusyHoursModal = ({ modalRef, setBusy, tasksToBeArranged, addButtonRef }) => {
   const [busyHours, setBusyHours] = React.useState([8, 14]);
   return (
     <BottomSheetModal
@@ -100,6 +100,22 @@ const BusyHoursModal = ({ modalRef, setBusy, tasksToBeArranged }) => {
             keyExtractor={(item, index) => index.toString()}
           />
         </View>
+              <Pressable
+        style={({ pressed }) => [
+          {
+            position: 'absolute',
+            right: 20,
+            bottom: 20,
+            backgroundColor: '#c987e6',
+            padding: 15,
+            borderRadius: 50,
+            transform: [{ scale: pressed ? 0.95 : 1 }],
+          },
+        ]}
+        onPress={addButtonRef}
+      >
+        <Ionicons name="add" size={24} color="white" />
+      </Pressable>
       </BottomSheetView>
     </BottomSheetModal>
   );
@@ -240,7 +256,7 @@ const NewTaskModal = ({ modalRef }) => {
                 difficulty: difficulty/10,
                 importance: priority/10,
                 duration:duration,
-                dueDate: firestore.Timestamp.fromDate(date),
+                dueDate: Timestamp.fromDate(date),
               })
               .then(() => {
                 Toast.show({
@@ -273,6 +289,7 @@ const AgendaScreen = () => {
   const [selectedDate, setSelectedDate] = React.useState(currentDate);
   const bottomSheetModalRef = useRef(null);
   const bottomSheetModalRef2 = useRef(null);
+  const loadedMonths = useRef([]);
   const handlePresentModalPress = () => {
     bottomSheetModalRef.current?.present();
   };
@@ -289,34 +306,61 @@ const AgendaScreen = () => {
   const GEMINI_API_KEY = "AIzaSyC1clS6dlnxagGHxNkI3fEkTq84WMNPhkA"
   const genAI = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
   const energyLevelJSON = `\n{ \"title\": \"Average Hourly Energy Levels\", \"xAxisLabel\": \"Hour\", \"yAxisLabel\": \"Energy Level\", \"data\": [ {\"hour\": 7, \"energyLevel\": 2.5}, {\"hour\": 8, \"energyLevel\": 3.2}, {\"hour\": 9, \"energyLevel\": 3.5}, {\"hour\": 10, \"energyLevel\": 3.8}, {\"hour\": 11, \"energyLevel\": 3.7}, {\"hour\": 12, \"energyLevel\": 3.5}, {\"hour\": 13, \"energyLevel\": 3.2}, {\"hour\": 14, \"energyLevel\": 1.8}, {\"hour\": 15, \"energyLevel\": 2.0}, {\"hour\": 16, \"energyLevel\": 2.3}, {\"hour\": 17, \"energyLevel\": 2.5}, {\"hour\": 18, \"energyLevel\": 3.2}, {\"hour\": 19, \"energyLevel\": 3.4}, {\"hour\": 20, \"energyLevel\": 3.7}, {\"hour\": 21, \"energyLevel\": 3.0}, {\"hour\": 22, \"energyLevel\": 2.5}, {\"hour\": 23, \"energyLevel\": 2.0}, {\"hour\": 0, \"energyLevel\": 1.5}, ], \"peak\": { \"start\": 7.5, \"end\": 12.5, \"label\": \"PEAK (7:30 AM - 12:30 PM): Ideal for complex tasks requiring focus and concentration.\" }, \"trough\": { \"start\": 13, \"end\": 15, \"label\": \"TROUGH (1:00 PM - 5:00 PM): Rest, recharge, or engage in low-intensity activities.\" }, \"rebound\": { \"start\": 17.5, \"end\": 20.5, \"label\": \"REBOUND (5:30 PM - 8:30 PM): Suitable for creative tasks or those requiring less intense focus.\" }, \"late_night\": { \"start\": 21, \"end\": 1, \"label\": \"LATE NIGHT (9:00 PM - 1:00 AM): Wind down, relax, and prepare for sleep.\" } }`
-  const prompt = `"You are an advanced time management assistant. Your task is to reorder and schedule the provided tasks based on the following JSON, which includes average hourly energy levels, categorized periods (PEAK, TROUGH, REBOUND, LATE NIGHT), and their respective suitability for various task types.
+  const prompt = `
+  Role:
+You are an advanced time management assistant.
 
-You must analyze the provided tasks, considering their importance, difficulty, and time cost, while ensuring absolutely no overlap in their schedules. Task durations must be rounded up to the nearest, highest whole hour (e.g., a task with a duration of 1.7 hours must be rounded to 2 hours (ceil)) when calculating the schedule. Additionally, take into account any user-specified busy hours and avoid scheduling tasks during those periods.
+Objective:
+Your primary objective is to create an optimized daily schedule by reordering and assigning time slots for a given list of tasks. The schedule must be based on the user's personal energy levels throughout the day, as detailed in the provided JSON data.
 
-To optimize user performance:
-- Harder and more important tasks should be scheduled during periods of higher energy levels.
-- Spread tasks across different days when possible to prevent overburdening the user.
-- Alternate between tasks of higher difficulty and tasks of lower difficulty if multiple tasks must be completed on the same day.
+Input Data:
+You will be provided with the following information:
 
-For each task, calculate and assign the following fields within its JSON object:
-- "optimalHour:int": The most suitable start hour for the task based on its requirements and the energy level data.
-- "energyLevel:float": The energy level at the calculated optimal hour.
-- "optimalDate: string (DD/MM/YYYY)": The most suitable start date for the task in the format DD/MM/YYYY, based on its priority, duration, and the given constraints.
+Task List: A list of tasks with the following attributes for each:
 
-Your response **must** strictly adhere to the provided JSON format and include all required fields for each task. Do not include any text or explanation outside of the JSON. Overlapping tasks, failure to adhere to the duration rounding rule, or any response containing anything other than the updated JSON will be considered invalid.
+Task Name: A brief description of the task.
+Importance: The priority level of the task (e.g., High, Medium, Low).
+Difficulty: The complexity of the task (e.g., Hard, Medium, Easy).
+Time Cost (in hours): The estimated duration to complete the task.
+User-Defined Busy Hours: A list of time slots during which no tasks can be scheduled. Take into account the lenght of the busy hours, not just the start and end times. Do not schedule any tasks during these hours. Do not overlap with these hours.
 
-For example, a valid JSON response should look like this:
-{"tasks":[
-    {
-    },
-    {
-    }
-]
-}
+Hourly Energy Level JSON: A JSON object that maps each hour of the day to an energy level and a corresponding period category. The categories and their suitability for different task types are as follows:
 
+PEAK: Ideal for the most demanding and important tasks.
+REBOUND: Suitable for moderately difficult or important tasks.
+TROUGH: Best for simple, low-energy tasks.
+LATE NIGHT: Reserved for optional or low-priority activities.
+Scheduling Rules & Constraints:
+You must adhere to the following rules when creating the schedule:
+Tasks must always start at the beginning of an hour (e.g., 9:00, 10:00).
+No Overlapping Tasks: Each task must have a unique, dedicated time slot.
+Adherence to Busy Hours: No tasks shall be scheduled during the user-specified busy hours.
+Task Duration Calculation: All task durations must be rounded up to the nearest whole hour (e.g., a 2.3-hour task should be scheduled for 3 hours).
+Energy-Based Task Placement:
+Schedule the most difficult and important tasks during PEAK energy periods.
+Use REBOUND periods for tasks of medium difficulty and importance.
+Assign the least difficult tasks to TROUGH periods.
+Task Distribution:
+Whenever possible, distribute tasks across multiple days to avoid over-scheduling and user burnout.
+If multiple tasks are scheduled for the same day, alternate between high-difficulty and low-difficulty tasks to maintain a balanced cognitive load.
+Output Format:
+The final output should be a clearly structured schedule, organized by day. For each day, provide a chronological list of scheduled tasks, including:
+
+Start Time
+End Time
+Task Name
+Assigned Energy Period (PEAK, REBOUND, TROUGH, LATE NIGHT)
+Example Output Structure:
+
+Monday
+
+09:00 - 11:00: Task A (PEAK)
+14:00 - 15:00: Task B (TROUGH)
+Tuesday
+
+10:00 - 12:00: Task C (PEAK)
 `
 const systemPrompt = prompt + energyLevelJSON;
-
 const handleiaiai = async () => {
     console.log(Array.from({ length: busyHours[1] - busyHours[0] + 1 }, (_, i) => i + busyHours[0]))
     setLoading(true);
@@ -326,34 +370,45 @@ const handleiaiai = async () => {
       environmentData: { currentDate: currentDate, currentTime: new Date().getHours() }
     };
     try {
-      const result = await ai.models.generateContent({
-        model:"gemini-2.5-flash",
-        contents: [
-          { role: "user", parts: [{ text: systemPrompt }] },
-          { role: "user", parts: [{ text: JSON.stringify(userPrompt) }] },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 512,
+      const result = await genAI.models.generateContent({
+        model:"gemini-2.5-flash-lite-preview-06-17",
+        contents: JSON.stringify(userPrompt),
+        config: {
+          thinkingConfig: {
+            thinkingBudget: 512,
+          },
+          systemInstruction: systemPrompt,
           responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              tasks: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    description: { type: Type.STRING },
+                    difficulty: { type: Type.NUMBER },
+                    importance: { type: Type.NUMBER },
+                    duration: { type: Type.NUMBER },
+                    dueDate: { type: Type.STRING },
+                    optimalHour: { type: Type.INTEGER },
+                    energyLevel: { type: Type.NUMBER },
+                    optimalDate: { type: Type.STRING },
+                  },
+                  required: ["description", "difficulty", "importance", "duration", "dueDate", "optimalHour", "energyLevel", "optimalDate"],
+                },
+              },
+            },
+          },
         },
       });
-
-      const responseText = result.response.text();
-      console.log("Gemini Raw Response:", responseText);
+      console.log(result.candidates[0].content["parts"][0].text);
+      const responseText = result.candidates[0].content["parts"][0].text
 
       let parsedResponse;
-      try {
-        parsedResponse = JSON.parse(responseText.replace(/```json\n|\n```/g, ''));
-      } catch (parseError) {
-        console.error("Failed to parse JSON directly, trying to extract JSON string:", parseError);
-        const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/);
-        if (jsonMatch && jsonMatch[1]) {
-          parsedResponse = JSON.parse(jsonMatch[1]);
-        } else {
-          throw new Error("Could not extract valid JSON from Gemini response.");
-        }
-      }
+      parsedResponse = JSON.parse(responseText);
+    
 
       const updatedTasks = parsedResponse.tasks.sort((a, b) => a.optimalHour - b.optimalHour);
       const newItems = {};
@@ -382,6 +437,59 @@ const handleiaiai = async () => {
         }
       });
       setItems(newItems);
+      const userId = auth().currentUser.uid;
+      const timestamp = Timestamp.now();
+      
+      // First get all existing ordered tasks for this user
+      const orderedTasksRef = collection(db, "users", userId, "orderedTasks");
+      
+      // We need to import getDocs and updateDoc at the top of the file
+      // import { getDocs, updateDoc } from '@react-native-firebase/firestore';
+      
+      getDocs(orderedTasksRef).then((querySnapshot) => {
+        const existingTasks = {};
+        querySnapshot.forEach((docSnapshot) => {
+          const data = docSnapshot.data();
+          // Use description as key to identify tasks
+          existingTasks[data.description] = { id: docSnapshot.id, ...data };
+        });
+        
+        // Process each task in newItems
+        Object.keys(newItems).forEach(date => {
+          if (newItems[date] && newItems[date].length > 0) {
+        newItems[date].forEach(task => {
+          if (existingTasks[task.description]) {
+            // Task exists, update it
+            const docId = existingTasks[task.description].id;
+            const docRef = doc(db, "users", userId, "orderedTasks", docId);
+            updateDoc(docRef, {
+          difficulty: task.difficulty,
+          importance: task.importance,
+          duration: task.duration,
+          dueDate: task.dueDate,
+          optimalHour: task.optimalHour,
+          energyLevel: task.energyLevel,
+          scheduledDate: date,
+          updatedAt: timestamp
+            });
+          } else {
+            // Task doesn't exist, create it
+            addDoc(collection(db, "users", userId, "orderedTasks"), {
+          description: task.description,
+          difficulty: task.difficulty,
+          importance: task.importance,
+          duration: task.duration,
+          dueDate: task.dueDate,
+          optimalHour: task.optimalHour,
+          energyLevel: task.energyLevel,
+          scheduledDate: date,
+          createdAt: timestamp
+            });
+          }
+        });
+          }
+        });
+      });
       setSelectedDate(newSelectedDate);
       console.log(newItems);
     } catch (error) {
@@ -392,22 +500,27 @@ const handleiaiai = async () => {
       setLoading(false);
     }
   }
-  useEffect(() => {
-    const newItems = {};
-    const today = new Date();
-    for (let i = -15; i < 85; i++) {
-      const time = today.getTime() + i * 24 * 60 * 60 * 1000;
-      const strTime = timeToString(time);
-      if (!newItems[strTime]) {
-        newItems[strTime] = [];
-      }
+useEffect(() => {
+  const newItems = {};
+  const today = new Date();
+  for (let i = -15; i < 85; i++) {
+    const time = today.getTime() + i * 24 * 60 * 60 * 1000;
+    const strTime = timeToString(time);
+    if (!newItems[strTime]) {
+      newItems[strTime] = [];
     }
-    setItems(newItems);
-  }, []);
-  const loadItems = useCallback((day) => {
-    setTimeout(() => {
-      setItems((prevItems) => {
-        const newItems = { ...prevItems };
+  }
+  setItems(newItems);
+}, []);
+const loadItems = useCallback((day) => {
+  const month = day.dateString.substring(0, 7);
+  if (loadedMonths.current.includes(month)) {
+    return;
+  }
+  loadedMonths.current.push(month);
+  setTimeout(() => {
+    setItems((prevItems) => {
+      const newItems = { ...prevItems };
         for (let i = -15; i < 85; i++) {
           const time = day.timestamp + i * 24 * 60 * 60 * 1000;
           const strTime = timeToString(time);
@@ -424,7 +537,7 @@ const handleiaiai = async () => {
     const coll = collection(db, "users", userId, "tasks")
     const unsubscribe = onSnapshot(coll, querySnapshot => {
         const tasks = [];
-        console.log(querySnapshot.ref);
+        console.log("nigga")
         querySnapshot.forEach(doc => {
           const data = doc.data();
           const date = data.dueDate.toDate().toISOString()
@@ -434,7 +547,8 @@ const handleiaiai = async () => {
             difficulty:data.difficulty,
             importance:data.importance,
             duration:data.duration,
-            dueDate:date
+            dueDate:date,
+            name:data.name
         });
         });
         setTasksToBeArranged(tasks);
@@ -463,7 +577,6 @@ const handleiaiai = async () => {
   const rowHasChanged = useCallback((r1, r2) => {
     return r1.name !== r2.name;
   }, []);
-
   return (
     <View style={{ flex: 1, backgroundColor: '#493155' }}>
       <Agenda
@@ -492,22 +605,6 @@ const handleiaiai = async () => {
         style={({ pressed }) => [
           {
             position: 'absolute',
-            right: 20,
-            bottom: 20,
-            backgroundColor: '#c987e6',
-            padding: 15,
-            borderRadius: 50,
-            transform: [{ scale: pressed ? 0.95 : 1 }],
-          },
-        ]}
-        onPress={handlePresentModalPress}
-      >
-        <Ionicons name="add" size={24} color="white" />
-      </Pressable>
-      <Pressable
-        style={({ pressed }) => [
-          {
-            position: 'absolute',
             left: 20,
             bottom: 20,
             backgroundColor: '#c987e6',
@@ -524,6 +621,7 @@ const handleiaiai = async () => {
         style={({ pressed }) => [
           {
             position: 'absolute',
+            right: 20,
             bottom: 20,
             alignSelf: 'center',
             backgroundColor: '#c987e6',
@@ -537,7 +635,7 @@ const handleiaiai = async () => {
         <Ionicons name="time" size={24} color="white" />
       </Pressable>
       <NewTaskModal modalRef={bottomSheetModalRef} />
-      <BusyHoursModal modalRef={bottomSheetModalRef2} setBusy={setBusyHours} tasksToBeArranged={tasksToBeArranged} />
+      <BusyHoursModal modalRef={bottomSheetModalRef2} setBusy={setBusyHours} tasksToBeArranged={tasksToBeArranged} addButtonRef={handlePresentModalPress} />
       {loading && (<View style={{position:"absolute", width:"100%", height:"100%", backgroundColor:"rgba(0, 0, 0, 0.9)", flex:1, justifyContent:"center", alignItems:"center", zIndex:999}}>
         <Image source={require('./assets/iaiai.gif')} style={{width:50, height:50}} />
       </View>)}
@@ -609,7 +707,7 @@ function SettingsTab() {
         backgroundStyle={{ backgroundColor: '#200f29' }}
         handleIndicatorStyle={{ backgroundColor: '#decfb4' }}
       >
-        <BottomSheetView style={{}}>
+        <BottomSheetView style={{height:"100%"}}>
 
         
           <Subscriptions></Subscriptions>
@@ -621,7 +719,7 @@ function SettingsTab() {
         backgroundStyle={{ backgroundColor: '#200f29' }}
         handleIndicatorStyle={{ backgroundColor: '#decfb4' }}
       >
-        <BottomSheetView style={{}}>
+        <BottomSheetView style={{height:"100%"}}>
           <Rab reff={bottomSheetModalRef2}/>
           </BottomSheetView>
       </BottomSheetModal>
